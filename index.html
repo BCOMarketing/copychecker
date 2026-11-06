@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --charcoal:#1A1919; --white:#FFFFFF; --grey:#53565A; --line:#D9D9D9; --gold:#CAB64B; --blue:#7A98AB; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:Roboto, Arial, sans-serif; color:var(--charcoal); background:var(--white); line-height:1.4; }
+  header{ background:var(--charcoal); color:var(--white); padding:20px 24px; }
+  header h1{ font-family:'Bebas Neue', Impact, sans-serif; font-weight:400; font-size:44px; line-height:0.9; margin:0; }
+  header p{ margin:8px 0 0; font-size:14px; color:#CFCFCF; max-width:640px; }
+  main{ max-width:1200px; margin:0 auto; padding:24px; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width:800px){ main{ grid-template-columns:1fr; } }
+  label{ display:block; font-weight:700; margin-bottom:6px; }
+  textarea{ width:100%; min-height:320px; padding:12px; font:inherit; font-size:15px; border:1px solid var(--line); border-radius:4px; resize:vertical; }
+  textarea:focus{ outline:2px solid var(--blue); outline-offset:1px; }
+  #out{ background:#F7F7F7; }
+  .row{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  button{ font:inherit; font-weight:700; padding:10px 18px; border:0; border-radius:4px; cursor:pointer; background:var(--charcoal); color:var(--white); }
+  button.secondary{ background:var(--white); color:var(--charcoal); border:1px solid var(--charcoal); }
+  button:disabled{ opacity:.5; cursor:default; }
+  button:focus-visible{ outline:2px solid var(--blue); outline-offset:2px; }
+  .lists{ grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width:800px){ .lists{ grid-template-columns:1fr; } }
+  h2{ font-family:'Bebas Neue', Impact, sans-serif; font-weight:400; font-size:28px; line-height:0.9; margin:0 0 10px; }
+  ul{ list-style:none; padding:0; margin:0; }
+  li{ border-top:1px solid var(--line); padding:8px 0; font-size:14px; }
+  .from{ text-decoration:line-through; color:var(--grey); }
+  .note{ color:var(--grey); }
+  .quote{ font-weight:700; }
+  .check li{ border-left:4px solid var(--gold); padding-left:10px; }
+  .empty{ color:var(--grey); }
+  #status{ font-size:14px; color:var(--grey); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Boulder Co. copy checker</h1>
+  <p>Paste your caption, then select Check copy. It fixes spelling, grammar and styleguide rules without changing your wording. Anything that needs your judgement is listed under Check these. Always read the fixed copy before you post.</p>
+</header>
+<main>
+  <div>
+    <label for="in">Your copy</label>
+    <textarea id="in" placeholder="Paste your caption here"></textarea>
+    <div class="row">
+      <button id="go">Check copy</button>
+      <button id="clear" class="secondary">Clear</button>
+      <span id="status" aria-live="polite"></span>
+    </div>
+  </div>
+  <div>
+    <label for="out">Fixed copy</label>
+    <textarea id="out" readonly></textarea>
+    <div class="row">
+      <button id="copy">Copy fixed copy</button>
+    </div>
+  </div>
+  <section class="lists">
+    <div>
+      <h2>Check these</h2>
+      <ul id="check" class="check"><li class="empty">Nothing yet.</li></ul>
+    </div>
+    <div>
+      <h2>Fixed</h2>
+      <ul id="changes"><li class="empty">Nothing yet.</li></ul>
+    </div>
+  </section>
+</main>
+<script>
+/* Paste your Apps Script web app URL (ending in /exec) between the quotes. */
+var API_URL = 'https://script.google.com/macros/s/AKfycbzs8x9TqQfYKVnb2gEOKneqahxecwIr0-O920MvRib_68Lth8U0mcGQ7j4Qvwf8guMjnA/exec';
+
+/* Day-name check. Done here rather than by the AI, because AI is unreliable at working out weekdays.
+   Flags dates with a missing or wrong day name. Never changes the copy. */
+var DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+var MONTHS = {jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11};
+var DAYIDX = {sun:0,sunday:0,mon:1,monday:1,tue:2,tues:2,tuesday:2,wed:3,weds:3,wednesday:3,thu:4,thur:4,thurs:4,thursday:4,fri:5,friday:5,sat:6,saturday:6};
+var DAY_RE = 'Monday|Mon|Tuesday|Tues|Tue|Wednesday|Weds|Wed|Thursday|Thurs|Thur|Thu|Friday|Fri|Saturday|Sat|Sunday|Sun';
+var MON_RE = 'January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec';
+function ord(n){ var s=n%100; if(s>=11&&s<=13) return n+'th'; return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th'); }
+function dayChecks(text){
+  var out=[], today=new Date();
+  var re = new RegExp('(?:\\b('+DAY_RE+')\\.?,?\\s+(?:the\\s+)?)?(?<![\\d:.\\/])\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?('+MON_RE+')\\b(?:,?\\s+(\\d{4}))?','g');
+  var m;
+  while((m = re.exec(text)) !== null){
+    var d=+m[2], mo=MONTHS[m[3].toLowerCase()], yr=m[4]?+m[4]:null;
+    if(!yr){ var y=today.getFullYear(), best=y, diff=Infinity;
+      [y-1,y,y+1].forEach(function(yy){ var df=Math.abs(new Date(yy,mo,d)-today); if(df<diff){diff=df;best=yy;} }); yr=best; }
+    var dt=new Date(yr,mo,d);
+    if(dt.getMonth()!==mo){ out.push({text:m[0], note:'This date doesn’t exist.'}); continue; }
+    var real=DAYS[dt.getDay()];
+    if(m[1]){
+      var given=DAYIDX[m[1].toLowerCase()];
+      if(given!==dt.getDay()) out.push({text:m[0], note:ord(d)+' '+m[3]+' '+yr+' is a '+real+', not a '+DAYS[given]+'.'});
+    } else {
+      out.push({text:m[0], note:'Add the day name: '+real+' (assuming '+yr+').'});
+    }
+  }
+  return out;
+}
+
+function el(tag, cls, txt){ var e=document.createElement(tag); if(cls) e.className=cls; if(txt!==undefined) e.textContent=txt; return e; }
+function status(t){ document.getElementById('status').textContent=t; }
+function show(r){
+  document.getElementById('out').value = r.fixed;
+  var checks = dayChecks(r.fixed).concat(r.check);
+  var cl=document.getElementById('changes'), ck=document.getElementById('check');
+  cl.innerHTML=''; ck.innerHTML='';
+  if(!r.changes.length) cl.appendChild(el('li','empty','No changes needed.'));
+  r.changes.forEach(function(c){
+    var li=el('li'); li.appendChild(el('span','from',c.from||'(blank)'));
+    li.appendChild(document.createTextNode(' → ')); li.appendChild(el('span','',c.to||'(removed)')); cl.appendChild(li);
+  });
+  if(!checks.length) ck.appendChild(el('li','empty','Nothing to check.'));
+  checks.forEach(function(c){
+    var li=el('li'); li.appendChild(el('div','quote',c.text)); li.appendChild(el('div','note',c.note)); ck.appendChild(li);
+  });
+  status(r.changes.length+' fixed, '+checks.length+' to check.');
+}
+document.getElementById('go').addEventListener('click', function(){
+  var btn=this, text=document.getElementById('in').value;
+  if(!text.trim()){ status('Paste some copy first.'); return; }
+  btn.disabled=true; status('Checking…');
+  fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // plain text avoids a CORS preflight Apps Script can't answer
+    body: JSON.stringify({ text: text })
+  })
+    .then(function(res){ return res.json(); })
+    .then(function(data){
+      btn.disabled=false;
+      if(data.ok) show(data.result); else status(data.error);
+    })
+    .catch(function(){ btn.disabled=false; status('Couldn’t reach the checker. Check your connection and try again.'); });
+});
+document.getElementById('clear').addEventListener('click', function(){
+  document.getElementById('in').value=''; document.getElementById('out').value='';
+  document.getElementById('changes').innerHTML='<li class="empty">Nothing yet.</li>';
+  document.getElementById('check').innerHTML='<li class="empty">Nothing yet.</li>';
+  status('');
+});
+document.getElementById('copy').addEventListener('click', function(){
+  var out=document.getElementById('out');
+  if(!out.value){ status('Check your copy first.'); return; }
+  out.select();
+  (navigator.clipboard ? navigator.clipboard.writeText(out.value) : Promise.reject()).catch(function(){ document.execCommand('copy'); })
+    .finally(function(){ status('Copied.'); });
+});
+</script>
+</body>
+</html>
